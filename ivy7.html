@@ -1,0 +1,344 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ivy打卡系統測試</title>
+    <!-- 引入 Google Maps API -->
+    <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA3tERLSOYQF5fIyZaFZt_kgqhPHxoerz8"></script>
+    <!-- 引入 XLSX 库 -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
+    <style>
+        body {
+            font-family: '微軟正黑體', sans-serif;
+            margin: 0;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+
+        .container {
+            max-width: 600px;
+            margin: 0 auto;
+            background-color: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .clock {
+            font-size: 48px;
+            text-align: center;
+            margin: 20px 0;
+            color: #333;
+        }
+
+        .date {
+            font-size: 24px;
+            text-align: center;
+            margin-bottom: 20px;
+            color: #666;
+        }
+
+        .btn {
+            display: block;
+            width: 200px;
+            margin: 10px auto;
+            padding: 15px;
+            font-size: 18px;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+            color: white;
+        }
+
+        .btn-in {
+            background-color: #4CAF50;
+        }
+
+        .btn-out {
+            background-color: #f44336;
+        }
+
+        .btn-download {
+            background-color: #008CBA;
+        }
+
+        .record {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .record-title {
+            font-size: 18px;
+            margin-bottom: 10px;
+            color: #333;
+        }
+
+        .record-list {
+            list-style: none;
+            padding: 0;
+        }
+
+        .record-item {
+            padding: 8px;
+            border-bottom: 1px solid #ddd;
+        }
+
+        .login {
+            margin-top: 20px;
+            text-align: center;
+        }
+
+        .reason-input {
+            margin: 10px 0;
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>ivy打卡系統測試</h1>
+        </div>
+
+        <div class="date" id="date"></div>
+        <div class="clock" id="clock"></div>
+
+        <div class="login">
+            <input type="password" id="passwordInput" placeholder="請輸入密碼" />
+            <button class="btn" onclick="validatePassword()">登入</button>
+        </div>
+
+        <input type="text" id="reasonInput" class="reason-input" placeholder="打卡原因 (早上09:00前或下午16:30後必填)" />
+
+        <button class="btn btn-in" onclick="clockIn()">上班打卡</button>
+        <button class="btn btn-out" onclick="clockOut()">下班打卡</button>
+        <button class="btn btn-download" id="downloadExcelButton" onclick="downloadExcel()" disabled>下載 Excel 刷卡紀錄</button>
+
+        <div class="record">
+            <div class="record-title">今日打卡紀錄</div>
+            <ul class="record-list" id="recordList"></ul>
+        </div>
+    </div>
+
+    <script>
+        let canDownload = false;
+        const recordsArray = [];
+        let clockInTime, clockOutTime;
+
+        // 更新時鐘
+        function updateClock() {
+            const now = new Date();
+            const clock = document.getElementById('clock');
+            const date = document.getElementById('date');
+
+            clock.textContent = now.toLocaleTimeString('zh-TW', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+
+            date.textContent = now.toLocaleDateString('zh-TW', {
+                year: 'numeric',
+                month: 'long',
+                day: 'numeric',
+                weekday: 'long'
+            });
+        }
+
+        // 驗證密碼
+        function validatePassword() {
+            const password = document.getElementById('passwordInput').value;
+            if (password === 'ivy1' || password === 'ivy2') {
+                canDownload = true;
+                document.getElementById('downloadExcelButton').disabled = false;
+                alert('登入成功！');
+            } else {
+                alert('密碼錯誤，請重試。');
+            }
+        }
+
+        // 上班打卡
+        function clockIn() {
+            getLocation('上班打卡', true);
+        }
+
+        // 下班打卡
+        function clockOut() {
+            getLocation('下班打卡', false);
+        }
+
+        // 獲取位置
+        function getLocation(type, isClockIn) {
+            if (navigator.geolocation) {
+                navigator.geolocation.getCurrentPosition((position) => {
+                    const latitude = position.coords.latitude;
+                    const longitude = position.coords.longitude;
+                    const now = new Date();
+                    if (isClockIn) {
+                        clockInTime = now;
+                    } else {
+                        clockOutTime = now;
+                    }
+                    addRecord(type, now, latitude, longitude);
+                }, () => {
+                    alert('無法獲取位置，請允許定位。');
+                });
+            } else {
+                alert('此瀏覽器不支援定位功能。');
+            }
+        }
+
+        // 使用 Google Maps Geocoding API 將經緯度轉換為地址
+        async function getAddressFromCoordinates(latitude, longitude) {
+            try {
+                const geocoder = new google.maps.Geocoder();
+                const latlng = { lat: parseFloat(latitude), lng: parseFloat(longitude) };
+
+                return new Promise((resolve, reject) => {
+                    geocoder.geocode({ location: latlng }, (results, status) => {
+                        if (status === 'OK') {
+                            if (results[0]) {
+                                resolve(results[0].formatted_address);
+                            } else {
+                                resolve('找不到地址');
+                            }
+                        } else {
+                            console.error('Geocoder 失敗:', status);
+                            resolve(`無法取得地址 (${latitude}, ${longitude})`);
+                        }
+                    });
+                });
+            } catch (error) {
+                console.error('地址轉換錯誤:', error);
+                return `地址轉換錯誤 (${latitude}, ${longitude})`;
+            }
+        }
+
+        // 新增打卡紀錄
+        async function addRecord(type, time, latitude, longitude) {
+            const recordList = document.getElementById('recordList');
+            const timeString = time.toLocaleTimeString('zh-TW', {
+                hour12: false,
+                hour: '2-digit',
+                minute: '2-digit',
+                second: '2-digit'
+            });
+            const dateString = time.toLocaleDateString('zh-TW');
+            const reason = document.getElementById('reasonInput').value;
+
+            // 檢查時間是否需要填寫原因
+            const hour = time.getHours();
+            const minute = time.getMinutes();
+            const isRequiredReason = (type === '上班打卡' && (hour < 9)) ||
+                (type === '下班打卡' && (hour > 16 || (hour === 16 && minute > 30)));
+
+            if (isRequiredReason && !reason) {
+                alert('請填寫打卡原因！');
+                return;
+            }
+
+            // 獲取實際地址
+            const address = await getAddressFromCoordinates(latitude, longitude);
+
+            const record = `${dateString} ${timeString} - ${type}\n地址: ${address}\n(緯度: ${latitude}, 經度: ${longitude})\n原因: ${reason}`;
+
+            recordsArray.push({
+                record,
+                latitude,
+                longitude,
+                address,
+                reason,
+                time,
+                type
+            });
+
+            const li = document.createElement('li');
+            li.className = 'record-item';
+            li.textContent = record;
+            recordList.appendChild(li);
+
+            document.getElementById('downloadExcelButton').disabled = false;
+            alert(`${type}成功！`);
+        }
+
+        // 下載 Excel 刷卡紀錄
+        async function downloadExcel() {
+            if (!canDownload) {
+                alert('請先登入！');
+                return;
+            }
+
+            try {
+                const workbook = XLSX.utils.book_new();
+                const sheetData = [];
+
+                // 添加表頭
+                const headers = [
+                    '工號', '歸屬日', '上班來源', '上班時間', '上班地點', '上班地點描述',
+                    '延長工時類型', '提前上班原因', '原因', '原因說明',
+                    '下班來源', '下班時間', '下班地點', '下班地點描述',
+                    '延長工時類型', '延後下班原因', '原因', '原因說明'
+                ];
+                sheetData.push(headers);
+
+                // 處理每筆記錄
+                for (const item of recordsArray) {
+                    const password = document.getElementById('passwordInput').value;
+                    const date = item.time.toLocaleDateString('zh-TW');
+                    const time = item.time.toLocaleTimeString('zh-TW', {
+                        hour12: false,
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit'
+                    });
+
+                    sheetData.push([
+                        password,
+                        date,
+                        '16\\網頁打卡',
+                        item.type === '上班打卡' ? time : '',
+                        item.address,
+                        `緯度: ${item.latitude}, 經度: ${item.longitude}`,
+                        'AdvanceWork\\提早上班',
+                        'Personal\\私事非加班',
+                        'R9999/其他',
+                        item.reason,
+                        '16\\網頁打卡',
+                        item.type === '下班打卡' ? time : '',
+                        item.address,
+                        `緯度: ${item.latitude}, 經度: ${item.longitude}`,
+                        'PostponeWork\\延後下班',
+                        'Personal\\私事非加班',
+                        'R9999/其他',
+                        item.reason
+                    ]);
+                }
+
+                const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+                XLSX.utils.book_append_sheet(workbook, worksheet, 'ivy');
+                XLSX.writeFile(workbook, 'ivy.xlsx');
+
+            } catch (error) {
+                console.error('產生 Excel 時發生錯誤:', error);
+                alert('產生 Excel 時發生錯誤，請稍後再試。');
+            }
+        }
+
+        // 初始化
+        setInterval(updateClock, 1000);
+        updateClock();
+    </script>
+</body>
+</html>
