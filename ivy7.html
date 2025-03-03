@@ -4,9 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ivy打卡系統測試</title>
-    <!-- 引入 Google Maps API -->
+    <!-- 抓取 Google Maps API -->
     <script src="https://maps.googleapis.com/maps/api/js?key=AIzaSyA3tERLSOYQF5fIyZaFZt_kgqhPHxoerz8"></script>
-    <!-- 引入 XLSX 库 -->
+    <!-- 抓取 XLSX 資料表 -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.0/xlsx.full.min.js"></script>
     <style>
         body {
@@ -64,8 +64,16 @@
             background-color: #f44336;
         }
 
+        .btn-bd {
+            background-color: #9C27B0;
+        }
+
         .btn-download {
             background-color: #008CBA;
+        }
+
+        .btn-convert {
+            background-color: #FF9800;
         }
 
         .record {
@@ -89,6 +97,7 @@
         .record-item {
             padding: 8px;
             border-bottom: 1px solid #ddd;
+            white-space: pre-wrap;
         }
 
         .login {
@@ -103,6 +112,31 @@
             border: 1px solid #ccc;
             border-radius: 5px;
         }
+
+        .address-convert {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 5px;
+        }
+
+        .address-input {
+            width: 100%;
+            padding: 10px;
+            margin: 10px 0;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 16px;
+        }
+
+        .coordinate-display {
+            margin-top: 15px;
+            padding: 15px;
+            background-color: #fff3cd;
+            border-radius: 5px;
+            min-height: 50px;
+            white-space: pre-line;
+        }
     </style>
 </head>
 <body>
@@ -115,7 +149,7 @@
         <div class="clock" id="clock"></div>
 
         <div class="login">
-            <input type="password" id="passwordInput" placeholder="請輸入密碼" />
+            <input type="password" id="passwordInput" placeholder="請輸入專區代碼" />
             <button class="btn" onclick="validatePassword()">登入</button>
         </div>
 
@@ -123,11 +157,21 @@
 
         <button class="btn btn-in" onclick="clockIn()">上班打卡</button>
         <button class="btn btn-out" onclick="clockOut()">下班打卡</button>
+        <button class="btn btn-bd" onclick="convertToBD()">神奇的經緯度轉換</button>
         <button class="btn btn-download" id="downloadExcelButton" onclick="downloadExcel()" disabled>下載 Excel 刷卡紀錄</button>
 
         <div class="record">
             <div class="record-title">今日打卡紀錄</div>
             <ul class="record-list" id="recordList"></ul>
+        </div>
+
+        <div class="address-convert">
+            <div class="record-title">住址轉換工具</div>
+            <input type="text" id="addressInput" class="address-input" placeholder="請輸入要轉換的地址" />
+            <button class="btn btn-convert" onclick="convertAddress()">單純住址轉換經緯度</button>
+            <div id="coordinateDisplay" class="coordinate-display">
+                單純系統座標顯示：
+            </div>
         </div>
     </div>
 
@@ -157,16 +201,131 @@
             });
         }
 
-        // 驗證密碼
+        // 驗證管理者密碼或專區代碼
         function validatePassword() {
             const password = document.getElementById('passwordInput').value;
-            if (password === 'ivy1' || password === 'ivy2') {
+            if (password === 'ivy1' || password === 'ivy2' || password === 'SUNWAY' || password === 'CG1986' || password === 'CG1986pilot') {
                 canDownload = true;
                 document.getElementById('downloadExcelButton').disabled = false;
                 alert('登入成功！');
             } else {
-                alert('密碼錯誤，請重試。');
+                alert('專區代碼認證錯誤，請重試。');
             }
+        }
+
+        // WGS84轉BD09的函數
+        function wgs84tobd09(lng, lat) {
+            const x_PI = 3.14159265358979324 * 3000.0 / 180.0;
+            const PI = 3.14159265358979324;
+
+            // WGS84轉GCJ02
+            let dlat = transformLat(lng - 105.0, lat - 35.0);
+            let dlng = transformLng(lng - 105.0, lat - 35.0);
+            let radlat = lat / 180.0 * PI;
+            let magic = Math.sin(radlat);
+            magic = 1 - 0.00669342162296594323 * magic * magic;
+            let sqrtmagic = Math.sqrt(magic);
+            dlat = (dlat * 180.0) / ((6378137.0 * (1 - 0.00669342162296594323)) / (magic * sqrtmagic) * PI);
+            dlng = (dlng * 180.0) / (6378137.0 / sqrtmagic * Math.cos(radlat) * PI);
+
+            let gcj_lat = lat + dlat;
+            let gcj_lng = lng + dlng;
+
+            // GCJ02轉BD09
+            let z = Math.sqrt(gcj_lng * gcj_lng + gcj_lat * gcj_lat) + 0.00002 * Math.sin(gcj_lat * x_PI);
+            let theta = Math.atan2(gcj_lat, gcj_lng) + 0.000003 * Math.cos(gcj_lng * x_PI);
+            let bd_lng = z * Math.cos(theta) + 0.0065;
+            let bd_lat = z * Math.sin(theta) + 0.006;
+
+            return {
+                lng: Number(bd_lng.toFixed(7)),
+                lat: Number(bd_lat.toFixed(7))
+            };
+        }
+
+        function transformLat(lng, lat) {
+            let ret = -100.0 + 2.0 * lng + 3.0 * lat + 0.2 * lat * lat + 0.1 * lng * lat + 0.2 * Math.sqrt(Math.abs(lng));
+            ret += (20.0 * Math.sin(6.0 * lng * Math.PI) + 20.0 * Math.sin(2.0 * lng * Math.PI)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(lat * Math.PI) + 40.0 * Math.sin(lat / 3.0 * Math.PI)) * 2.0 / 3.0;
+            ret += (160.0 * Math.sin(lat / 12.0 * Math.PI) + 320 * Math.sin(lat * Math.PI / 30.0)) * 2.0 / 3.0;
+            return ret;
+        }
+
+        function transformLng(lng, lat) {
+            let ret = 300.0 + lng + 2.0 * lat + 0.1 * lng * lng + 0.1 * lng * lat + 0.1 * Math.sqrt(Math.abs(lng));
+            ret += (20.0 * Math.sin(6.0 * lng * Math.PI) + 20.0 * Math.sin(2.0 * lng * Math.PI)) * 2.0 / 3.0;
+            ret += (20.0 * Math.sin(lng * Math.PI) + 40.0 * Math.sin(lng / 3.0 * Math.PI)) * 2.0 / 3.0;
+            ret += (150.0 * Math.sin(lng / 12.0 * Math.PI) + 300.0 * Math.sin(lng / 30.0 * Math.PI)) * 2.0 / 3.0;
+            return ret;
+        }
+
+        // 住址轉換功能
+        async function convertAddress() {
+            const address = document.getElementById('addressInput').value;
+            if (!address) {
+                alert('請輸入地址！');
+                return;
+            }
+
+            try {
+                const geocoder = new google.maps.Geocoder();
+
+                // 使用 Promise 包裝 geocode 請求
+                const result = await new Promise((resolve, reject) => {
+                    geocoder.geocode({ address: address }, (results, status) => {
+                        if (status === 'OK') {
+                            resolve(results[0]);
+                        } else {
+                            reject(new Error('地址轉換失敗: ' + status));
+                        }
+                    });
+                });
+
+                // 獲取 WGS84 坐標
+                const wgs84Lat = result.geometry.location.lat();
+                const wgs84Lng = result.geometry.location.lng();
+
+                // 轉換為 BD09 坐標
+                const bd09 = wgs84tobd09(wgs84Lng, wgs84Lat);
+
+                // 格式化顯示內容
+                const displayContent = `單純系統座標顯示：
+參考 Google map 坐標系：
+緯度: ${wgs84Lat.toFixed(7)}
+經度: ${wgs84Lng.toFixed(7)}
+
+◆精準轉換系統坐標系：
+緯度: ${bd09.lat}
+經度: ${bd09.lng}
+
+地址: ${result.formatted_address}`;
+
+                // 更新顯示
+                document.getElementById('coordinateDisplay').innerText = displayContent;
+
+            } catch (error) {
+                console.error('轉換錯誤:', error);
+                alert('地址轉換失敗，請確認地址是否正確。');
+            }
+        }
+
+        // BD轉換按鈕點擊事件
+        function convertToBD() {
+            if (recordsArray.length === 0) {
+                alert('尚無打卡記錄可供轉換！');
+                return;
+            }
+
+            const lastRecord = recordsArray[recordsArray.length - 1];
+            const bd = wgs84tobd09(lastRecord.longitude, lastRecord.latitude);
+
+            // 更新最後一筆記錄
+            lastRecord.bdCoordinates = `${bd.lat},${bd.lng}`;
+
+            // 更新顯示
+            const recordList = document.getElementById('recordList');
+            const lastLi = recordList.lastElementChild;
+            lastLi.textContent = lastLi.textContent + `\n系統坐標: ${bd.lat},${bd.lng}`;
         }
 
         // 上班打卡
@@ -274,7 +433,7 @@
         }
 
         // 下載 Excel 刷卡紀錄
-        async function downloadExcel() {
+        function downloadExcel() {
             if (!canDownload) {
                 alert('請先登入！');
                 return;
@@ -282,20 +441,22 @@
 
             try {
                 const workbook = XLSX.utils.book_new();
-                const sheetData = [];
 
-                // 添加表頭
-                const headers = [
-                    '工號', '歸屬日', '上班來源', '上班時間', '上班地點', '上班地點描述',
+                // 原始資料頁籤
+                const sheetData = [['工號', '歸屬日', '上班來源', '上班時間', '上班地點', '上班地點描述',
                     '延長工時類型', '提前上班原因', '原因', '原因說明',
                     '下班來源', '下班時間', '下班地點', '下班地點描述',
-                    '延長工時類型', '延後下班原因', '原因', '原因說明'
-                ];
-                sheetData.push(headers);
+                    '延長工時類型', '延後下班原因', '原因', '原因說明']];
 
-                // 處理每筆記錄
-                for (const item of recordsArray) {
-                    const password = document.getElementById('passwordInput').value;
+                // BD坐標頁籤
+                const bdSheetData = [['工號', '歸屬日', '上班來源', '上班時間', '上班地點', '上班地點描述',
+                    '延長工時類型', '提前上班原因', '原因', '原因說明',
+                    '下班來源', '下班時間', '下班地點', '下班地點描述',
+                    '延長工時類型', '延後下班原因', '原因', '原因說明', 'BD坐標']];
+
+                const password = document.getElementById('passwordInput').value;
+
+                recordsArray.forEach(item => {
                     const date = item.time.toLocaleDateString('zh-TW');
                     const time = item.time.toLocaleTimeString('zh-TW', {
                         hour12: false,
@@ -304,7 +465,7 @@
                         second: '2-digit'
                     });
 
-                    sheetData.push([
+                    const rowData = [
                         password,
                         date,
                         '16\\網頁打卡',
@@ -323,11 +484,26 @@
                         'Personal\\私事非加班',
                         'R9999/其他',
                         item.reason
-                    ]);
-                }
+                    ];
 
+                    // 加入原始資料
+                    sheetData.push(rowData);
+
+                    // 加入BD坐標資料
+                    const bdRowData = [...rowData];
+                    bdRowData.push(item.bdCoordinates || '');
+                    bdSheetData.push(bdRowData);
+                });
+
+                // 建立兩個工作表
                 const worksheet = XLSX.utils.aoa_to_sheet(sheetData);
+                const bdWorksheet = XLSX.utils.aoa_to_sheet(bdSheetData);
+
+                // 加入工作表到工作簿
                 XLSX.utils.book_append_sheet(workbook, worksheet, 'ivy');
+                XLSX.utils.book_append_sheet(workbook, bdWorksheet, '轉換後的BD座標');
+
+                // 下載Excel檔案
                 XLSX.writeFile(workbook, 'ivy.xlsx');
 
             } catch (error) {
